@@ -1,3 +1,4 @@
+%%writefile career_agent.py
 
 import os
 import json
@@ -25,13 +26,9 @@ from pypdf import PdfReader
 load_dotenv()
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY is not set")
-
-if not TAVILY_API_KEY:
-    raise ValueError("TAVILY_API_KEY is not set")
 
 
 # ============================================================
@@ -46,55 +43,42 @@ llm = ChatGoogleGenerativeAI(
 
 
 # ============================================================
-# 3. WEB SEARCH
-# ============================================================
-
-def web_search(query):
-
-    url = "https://api.tavily.com/search"
-
-    data = {
-        "api_key": TAVILY_API_KEY,
-        "query": query,
-        "search_depth": "advanced",
-        "max_results": 5
-    }
-
-    response = requests.post(
-        url,
-        json=data,
-        timeout=30
-    )
-
-    response.raise_for_status()
-
-    return response.json()
-
-
-# ============================================================
-# 4. JOB SEARCH TOOL
+# 3. JOB SEARCH TOOL
 # ============================================================
 
 @tool
 def job_search(role: str) -> str:
     """
-    Search for current jobs and internships for a given role.
+    Search current jobs and internships using a public jobs API.
     """
-
-    query = f"{role} jobs internships fresher India"
 
     try:
 
-        result = web_search(query)
+        url = "https://remotive.com/api/remote-jobs"
+
+        response = requests.get(
+            url,
+            params={
+                "search": role
+            },
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
 
         jobs = []
 
-        for item in result.get("results", []):
+        for job in data.get("jobs", [])[:10]:
 
             jobs.append({
-                "title": item.get("title"),
-                "url": item.get("url"),
-                "description": item.get("content")
+                "title": job.get("title"),
+                "company": job.get("company_name"),
+                "location": job.get("candidate_required_location"),
+                "job_type": job.get("job_type"),
+                "url": job.get("url"),
+                "description": job.get("description", "")[:500]
             })
 
         return json.dumps(
@@ -108,12 +92,12 @@ def job_search(role: str) -> str:
     except Exception as e:
 
         return json.dumps({
-            "error": str(e)
+            "error": f"Job search failed: {str(e)}"
         })
 
 
 # ============================================================
-# 5. SKILL GAP TOOL
+# 4. SKILL GAP TOOL
 # ============================================================
 
 @tool
@@ -122,30 +106,33 @@ def skill_gap_analysis(
     role: str
 ) -> str:
     """
-    Compare resume skills with skills required for the target role.
+    Compare the student's resume with the target role.
     """
 
     prompt = f"""
 You are an AI career advisor.
 
-Analyze this student's resume.
+Analyze the student's resume for the target role.
 
 TARGET ROLE:
 {role}
 
-RESUME:
+STUDENT RESUME:
 {resume_text}
 
-Give:
+Provide:
 
 1. Existing skills
-2. Missing skills
-3. Skills that need improvement
-4. Technologies to learn
-5. Priority of each skill
-6. Short learning roadmap
+2. Matching skills
+3. Missing skills
+4. Skills that need improvement
+5. Technologies to learn
+6. Priority:
+   High / Medium / Low
+7. Short learning roadmap
 
-Keep the answer suitable for a college student or fresher.
+Keep the recommendations practical for a college student
+or fresher.
 """
 
     try:
@@ -156,11 +143,11 @@ Keep the answer suitable for a college student or fresher.
 
     except Exception as e:
 
-        return f"Skill gap analysis error: {str(e)}"
+        return f"Skill gap analysis failed: {str(e)}"
 
 
 # ============================================================
-# 6. PROJECT IDEA TOOL
+# 5. PROJECT IDEA TOOL
 # ============================================================
 
 @tool
@@ -169,31 +156,49 @@ def project_idea_lookup(
     skills: str
 ) -> str:
     """
-    Search for project ideas suitable for the student's target role.
+    Find project ideas using the public GitHub API.
     """
-
-    query = (
-        f"{role} project ideas "
-        f"GitHub portfolio projects "
-        f"{skills}"
-    )
 
     try:
 
-        result = web_search(query)
+        query = f"{role} {skills}"
+
+        url = "https://api.github.com/search/repositories"
+
+        response = requests.get(
+            url,
+            params={
+                "q": query,
+                "sort": "stars",
+                "order": "desc",
+                "per_page": 10
+            },
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "AI-Career-Agent"
+            },
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
 
         projects = []
 
-        for item in result.get("results", []):
+        for repo in data.get("items", []):
 
             projects.append({
-                "title": item.get("title"),
-                "url": item.get("url"),
-                "description": item.get("content")
+                "name": repo.get("name"),
+                "description": repo.get("description"),
+                "language": repo.get("language"),
+                "stars": repo.get("stargazers_count"),
+                "url": repo.get("html_url")
             })
 
         return json.dumps(
             {
+                "role": role,
                 "projects": projects
             },
             indent=2
@@ -202,18 +207,18 @@ def project_idea_lookup(
     except Exception as e:
 
         return json.dumps({
-            "error": str(e)
+            "error": f"Project lookup failed: {str(e)}"
         })
 
 
 # ============================================================
-# 7. GITHUB CHECK TOOL
+# 6. GITHUB CHECK TOOL
 # ============================================================
 
 @tool
 def github_check(github_id: str) -> str:
     """
-    Check a public GitHub profile and repositories.
+    Check a student's public GitHub profile and repositories.
     """
 
     username = github_id.strip()
@@ -235,7 +240,10 @@ def github_check(github_id: str) -> str:
 
     try:
 
-        # User profile
+        # ----------------------------------------------------
+        # GitHub profile
+        # ----------------------------------------------------
+
         user_url = (
             f"https://api.github.com/users/{username}"
         )
@@ -256,7 +264,10 @@ def github_check(github_id: str) -> str:
 
         user = user_response.json()
 
-        # Repositories
+        # ----------------------------------------------------
+        # GitHub repositories
+        # ----------------------------------------------------
+
         repo_url = (
             f"https://api.github.com/users/"
             f"{username}/repos"
@@ -284,34 +295,34 @@ def github_check(github_id: str) -> str:
                 "name": repo.get("name"),
                 "description": repo.get("description"),
                 "language": repo.get("language"),
-                "stars": repo.get(
-                    "stargazers_count"
-                ),
-                "forks": repo.get(
-                    "forks_count"
-                ),
-                "updated": repo.get(
-                    "updated_at"
-                ),
-                "url": repo.get(
-                    "html_url"
-                )
+                "stars": repo.get("stargazers_count"),
+                "forks": repo.get("forks_count"),
+                "updated": repo.get("updated_at"),
+                "url": repo.get("html_url")
             })
 
         result = {
+
             "username": user.get("login"),
+
             "name": user.get("name"),
+
             "bio": user.get("bio"),
-            "repositories": user.get(
-                "public_repos"
-            ),
-            "followers": user.get(
-                "followers"
-            ),
-            "profile": user.get(
-                "html_url"
-            ),
-            "recent_repositories": repos
+
+            "public_repositories":
+                user.get("public_repos"),
+
+            "followers":
+                user.get("followers"),
+
+            "following":
+                user.get("following"),
+
+            "profile":
+                user.get("html_url"),
+
+            "recent_repositories":
+                repos
         }
 
         return json.dumps(
@@ -322,12 +333,12 @@ def github_check(github_id: str) -> str:
     except Exception as e:
 
         return json.dumps({
-            "error": str(e)
+            "error": f"GitHub check failed: {str(e)}"
         })
 
 
 # ============================================================
-# 8. TOOLS
+# 7. TOOLS
 # ============================================================
 
 tools = [
@@ -339,7 +350,7 @@ tools = [
 
 
 # ============================================================
-# 9. CREATE AGENT
+# 8. CREATE AGENT
 # ============================================================
 
 agent = create_agent(
@@ -353,7 +364,7 @@ You are an AI Career Advisor Agent.
 
 The student provides:
 
-- Resume
+- Resume PDF
 - Target role
 - GitHub ID
 
@@ -364,18 +375,18 @@ You have four tools:
 3. Project Idea Lookup
 4. GitHub Check
 
-Choose the appropriate tools based on the student's input.
+Use the appropriate tools to analyze the student's profile.
 
-For a complete career analysis, use all four tools when possible.
+For a complete analysis, use all four tools when possible.
 
-After collecting the tool results, create a final synthesis.
+After receiving the tool results, create a FINAL SYNTHESIS.
 
-The final response must contain:
+The final answer must contain:
 
 1. Career suitability
 2. Matching skills
 3. Skill gaps
-4. Skills to learn
+4. Recommended skills to learn
 5. Job opportunities
 6. Recommended projects
 7. GitHub analysis
@@ -384,13 +395,16 @@ The final response must contain:
 
 Do not invent information.
 
-Clearly explain the results in a simple and useful way.
+Clearly explain the results in simple language suitable
+for a college student.
+
+If a tool does not return results, clearly mention that.
 """
 )
 
 
 # ============================================================
-# 10. INPUT MODEL
+# 9. INPUT MODEL
 # ============================================================
 
 class AgentInput(BaseModel):
@@ -404,12 +418,12 @@ class AgentInput(BaseModel):
     )
 
     github_id: str = Field(
-        description="GitHub username"
+        description="GitHub username or profile URL"
     )
 
 
 # ============================================================
-# 11. FORMAT INPUT
+# 10. FORMAT INPUT
 # ============================================================
 
 def format_for_agent(x):
@@ -438,8 +452,16 @@ GITHUB ID:
 RESUME:
 {resume_text}
 
-Analyze this student and provide a complete career analysis.
-Use the available tools and give a final synthesis.
+Perform a complete career analysis.
+
+Use the available tools for:
+
+- Job search
+- Skill gap analysis
+- Project recommendations
+- GitHub analysis
+
+Then provide a final synthesis.
 """
 
     return {
@@ -450,7 +472,7 @@ Use the available tools and give a final synthesis.
 
 
 # ============================================================
-# 12. EXTRACT RESPONSE
+# 11. EXTRACT FINAL RESPONSE
 # ============================================================
 
 def extract_text_response(output):
@@ -465,19 +487,19 @@ def extract_text_response(output):
 
         last = messages[-1]
 
-        return str(
-            getattr(
-                last,
-                "content",
-                last
-            )
+        content = getattr(
+            last,
+            "content",
+            last
         )
+
+        return str(content)
 
     return str(output)
 
 
 # ============================================================
-# 13. AGENT CHAIN
+# 12. AGENT CHAIN
 # ============================================================
 
 formatted_agent_chain = (
@@ -495,16 +517,17 @@ formatted_agent_chain = (
 
 
 # ============================================================
-# 14. FASTAPI
+# 13. FASTAPI
 # ============================================================
 
 app = FastAPI(
-    title="AI Career Advisor Agent"
+    title="AI Career Advisor Agent",
+    description="AI Career Agent using Gemma 4 and FastAPI"
 )
 
 
 # ============================================================
-# 15. CORS
+# 14. CORS
 # ============================================================
 
 app.add_middleware(
@@ -517,7 +540,7 @@ app.add_middleware(
 
 
 # ============================================================
-# 16. LANGSERVE
+# 15. LANGSERVE
 # ============================================================
 
 add_routes(
@@ -529,7 +552,7 @@ add_routes(
 
 
 # ============================================================
-# 17. PDF TEXT EXTRACTION
+# 16. PDF TEXT EXTRACTION
 # ============================================================
 
 def extract_pdf_text(file_bytes):
@@ -554,7 +577,7 @@ def extract_pdf_text(file_bytes):
 
 
 # ============================================================
-# 18. PDF ANALYSIS API
+# 17. PDF ANALYSIS ENDPOINT
 # ============================================================
 
 @app.post("/analyze-pdf")
@@ -565,6 +588,7 @@ async def analyze_pdf(
     role: str = Form(...),
 
     github_id: str = Form(...)
+
 ):
 
     if not resume.filename.lower().endswith(".pdf"):
@@ -576,9 +600,18 @@ async def analyze_pdf(
 
     file_bytes = await resume.read()
 
-    resume_text = extract_pdf_text(
-        file_bytes
-    )
+    try:
+
+        resume_text = extract_pdf_text(
+            file_bytes
+        )
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"PDF reading failed: {str(e)}"
+        )
 
     if not resume_text.strip():
 
@@ -598,22 +631,32 @@ async def analyze_pdf(
     })
 
     return {
+
         "status": "success",
+
         "role": role,
+
         "github_id": github_id,
+
         "analysis": result
+
     }
 
 
 # ============================================================
-# 19. HOME
+# 18. HOME
 # ============================================================
 
 @app.get("/")
 def home():
 
     return {
-        "message": "AI Career Advisor Agent is running",
+
+        "message":
+            "AI Career Advisor Agent is running",
+
+        "model":
+            "gemma-4-31b-it",
 
         "tools": [
             "job_search",
@@ -621,11 +664,12 @@ def home():
             "project_idea_lookup",
             "github_check"
         ]
+
     }
 
 
 # ============================================================
-# 20. RUN
+# 19. RUN SERVER
 # ============================================================
 
 if __name__ == "__main__":
