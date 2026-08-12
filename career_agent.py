@@ -1,5 +1,3 @@
-
-
 import os
 import json
 import requests
@@ -22,19 +20,15 @@ from langserve import add_routes
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableLambda
 
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI
-)
-
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 
 from pydantic import BaseModel, Field
-
 from pypdf import PdfReader
 
 
 # ============================================================
-# 1. LOAD ENVIRONMENT VARIABLES
+# 1. LOAD API KEY
 # ============================================================
 
 load_dotenv()
@@ -42,9 +36,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
-    raise ValueError(
-        "GOOGLE_API_KEY is not set"
-    )
+    raise ValueError("GOOGLE_API_KEY is not set")
 
 
 # ============================================================
@@ -65,20 +57,16 @@ llm = ChatGoogleGenerativeAI(
 @tool
 def job_search(role: str) -> str:
     """
-    Search for jobs related to the student's target role.
-    Uses the public Remotive jobs API.
+    Search current jobs related to the target role.
     """
 
     try:
 
-        # Search using the role
         url = "https://remotive.com/api/remote-jobs"
 
         response = requests.get(
             url,
-            params={
-                "search": role
-            },
+            params={"search": role},
             timeout=30
         )
 
@@ -86,106 +74,49 @@ def job_search(role: str) -> str:
 
         data = response.json()
 
-        all_jobs = data.get(
-            "jobs",
-            []
-        )
+        jobs = []
 
-        # Keywords for AI/ML jobs
-        ai_keywords = [
+        keywords = [
             "ai",
             "artificial intelligence",
             "machine learning",
-            "ml",
+            "ml engineer",
+            "machine learning engineer",
             "deep learning",
             "data scientist",
-            "data science",
             "computer vision",
             "nlp",
             "generative ai",
             "llm"
         ]
 
-        jobs = []
-
-        for job in all_jobs:
+        for job in data.get("jobs", []):
 
             title = (
                 job.get("title") or ""
             ).lower()
 
-            description = (
-                job.get("description") or ""
-            ).lower()
-
-            # Check whether job is relevant
-            relevant = any(
-                keyword in title
-                or keyword in description
-                for keyword in ai_keywords
-            )
-
-            if relevant:
+            if any(
+                word in title
+                for word in keywords
+            ):
 
                 jobs.append({
-
-                    "title":
-                        job.get("title"),
-
-                    "company":
-                        job.get("company_name"),
-
-                    "location":
-                        job.get(
-                            "candidate_required_location"
-                        ),
-
-                    "job_type":
-                        job.get("job_type"),
-
-                    "url":
-                        job.get("url"),
-
-                    "description":
-                        job.get(
-                            "description",
-                            ""
-                        )[:600]
+                    "title": job.get("title"),
+                    "company": job.get("company_name"),
+                    "location": job.get(
+                        "candidate_required_location"
+                    ),
+                    "job_type": job.get("job_type"),
+                    "url": job.get("url")
                 })
 
             if len(jobs) >= 10:
                 break
 
-        # If filtering returned nothing,
-        # return first few search results
-        if not jobs:
-
-            for job in all_jobs[:10]:
-
-                jobs.append({
-
-                    "title":
-                        job.get("title"),
-
-                    "company":
-                        job.get("company_name"),
-
-                    "location":
-                        job.get(
-                            "candidate_required_location"
-                        ),
-
-                    "job_type":
-                        job.get("job_type"),
-
-                    "url":
-                        job.get("url")
-                })
-
         return json.dumps(
             {
-                "target_role": role,
-                "jobs_found": len(jobs),
+                "role": role,
                 "jobs": jobs
             },
             indent=2
@@ -194,8 +125,7 @@ def job_search(role: str) -> str:
     except Exception as e:
 
         return json.dumps({
-            "error":
-                f"Job search failed: {str(e)}"
+            "error": str(e)
         })
 
 
@@ -209,56 +139,44 @@ def skill_gap_analysis(
     role: str
 ) -> str:
     """
-    Compare student's resume skills with
-    the requirements of the target role.
+    Analyze the student's skill gaps for the target role.
     """
 
     prompt = f"""
-You are an expert AI/ML career advisor.
+You are an AI/ML career advisor.
 
-Analyze the student's resume for the target role.
-
-TARGET ROLE:
+Target role:
 {role}
 
-STUDENT RESUME:
+Student resume:
 {resume_text}
 
-Provide a concise but useful analysis with:
+Analyze:
 
 1. Existing skills
 2. Matching skills
 3. Missing skills
-4. Skills that need improvement
+4. Skills to improve
 5. Technologies to learn
-6. Priority:
-   High / Medium / Low
-7. Recommended learning roadmap
+6. Priority of skills
+7. Learning roadmap
 
-Focus on practical skills for a college student
-or fresher.
-
-Do not invent information about the student.
+Keep the answer practical for a college student.
 """
 
     try:
 
         response = llm.invoke(prompt)
 
-        return extract_llm_text(
-            response
-        )
+        return get_text(response)
 
     except Exception as e:
 
-        return (
-            "Skill gap analysis failed: "
-            + str(e)
-        )
+        return "Skill gap analysis failed: " + str(e)
 
 
 # ============================================================
-# 5. PROJECT IDEA TOOL
+# 5. PROJECT TOOL
 # ============================================================
 
 @tool
@@ -267,40 +185,32 @@ def project_idea_lookup(
     skills: str
 ) -> str:
     """
-    Find relevant GitHub projects for the
-    student's target role and skills.
+    Find GitHub projects related to the target role.
     """
 
     try:
-
-        query = (
-            f"{role} {skills}"
-        )
 
         url = (
             "https://api.github.com/"
             "search/repositories"
         )
 
+        query = f"{role} {skills}"
+
         response = requests.get(
-
             url,
-
             params={
                 "q": query,
                 "sort": "stars",
                 "order": "desc",
                 "per_page": 10
             },
-
             headers={
                 "Accept":
                     "application/vnd.github+json",
-
                 "User-Agent":
                     "AI-Career-Agent"
             },
-
             timeout=30
         )
 
@@ -316,70 +226,44 @@ def project_idea_lookup(
         ):
 
             projects.append({
-
-                "name":
-                    repo.get("name"),
-
-                "description":
-                    repo.get("description"),
-
-                "language":
-                    repo.get("language"),
-
-                "stars":
-                    repo.get(
-                        "stargazers_count"
-                    ),
-
-                "forks":
-                    repo.get(
-                        "forks_count"
-                    ),
-
-                "url":
-                    repo.get("html_url")
+                "name": repo.get("name"),
+                "description": repo.get(
+                    "description"
+                ),
+                "language": repo.get(
+                    "language"
+                ),
+                "stars": repo.get(
+                    "stargazers_count"
+                ),
+                "url": repo.get(
+                    "html_url"
+                )
             })
 
         return json.dumps(
-
             {
-                "target_role":
-                    role,
-
-                "projects_found":
-                    len(projects),
-
-                "projects":
-                    projects
+                "projects": projects
             },
-
             indent=2
         )
 
     except Exception as e:
 
         return json.dumps({
-
-            "error":
-                f"Project lookup failed: {str(e)}"
-
+            "error": str(e)
         })
 
 
 # ============================================================
-# 6. GITHUB CHECK TOOL
+# 6. GITHUB TOOL
 # ============================================================
 
 @tool
 def github_check(github_id: str) -> str:
     """
-    Check a student's public GitHub profile,
-    repositories and activity.
+    Check public GitHub profile and repositories.
     """
-
-    # --------------------------------------------------------
-    # Clean GitHub username
-    # --------------------------------------------------------
 
     username = github_id.strip()
 
@@ -396,26 +280,19 @@ def github_check(github_id: str) -> str:
 
         username = username[1:]
 
-    # Remove accidental spaces
     username = username.replace(
         " ",
         ""
     )
 
     headers = {
-
         "Accept":
             "application/vnd.github+json",
-
         "User-Agent":
             "AI-Career-Agent"
     }
 
     try:
-
-        # ----------------------------------------------------
-        # GitHub Profile
-        # ----------------------------------------------------
 
         user_url = (
             f"https://api.github.com/"
@@ -423,58 +300,35 @@ def github_check(github_id: str) -> str:
         )
 
         user_response = requests.get(
-
             user_url,
-
             headers=headers,
-
             timeout=20
         )
 
         if user_response.status_code == 404:
 
             return json.dumps({
-
                 "error":
                     f"GitHub user '{username}' "
-                    f"was not found.",
-
-                "suggestion":
-                    "Enter the exact GitHub username."
-
+                    f"not found."
             })
 
         user_response.raise_for_status()
 
         user = user_response.json()
 
-        # ----------------------------------------------------
-        # Repositories
-        # ----------------------------------------------------
-
         repo_url = (
-
             f"https://api.github.com/"
             f"users/{username}/repos"
-
         )
 
         repo_response = requests.get(
-
             repo_url,
-
             headers=headers,
-
             params={
-
-                "sort":
-                    "updated",
-
-                "per_page":
-                    10
-
+                "sort": "updated",
+                "per_page": 10
             },
-
             timeout=20
         )
 
@@ -487,102 +341,74 @@ def github_check(github_id: str) -> str:
         for repo in repositories:
 
             repos.append({
-
-                "name":
-                    repo.get("name"),
-
-                "description":
-                    repo.get("description"),
-
-                "language":
-                    repo.get("language"),
-
-                "stars":
-                    repo.get(
-                        "stargazers_count"
-                    ),
-
-                "forks":
-                    repo.get(
-                        "forks_count"
-                    ),
-
-                "updated":
-                    repo.get(
-                        "updated_at"
-                    ),
-
-                "url":
-                    repo.get(
-                        "html_url"
-                    )
+                "name": repo.get("name"),
+                "description": repo.get(
+                    "description"
+                ),
+                "language": repo.get(
+                    "language"
+                ),
+                "stars": repo.get(
+                    "stargazers_count"
+                ),
+                "forks": repo.get(
+                    "forks_count"
+                ),
+                "updated": repo.get(
+                    "updated_at"
+                ),
+                "url": repo.get(
+                    "html_url"
+                )
             })
 
-        # ----------------------------------------------------
-        # Result
-        # ----------------------------------------------------
-
-        result = {
-
-            "username":
-                user.get("login"),
-
-            "name":
-                user.get("name"),
-
-            "bio":
-                user.get("bio"),
-
-            "public_repositories":
-                user.get("public_repos"),
-
-            "followers":
-                user.get("followers"),
-
-            "following":
-                user.get("following"),
-
-            "profile":
-                user.get("html_url"),
-
-            "recent_repositories":
-                repos
-        }
-
         return json.dumps(
-            result,
+            {
+                "username":
+                    user.get("login"),
+
+                "name":
+                    user.get("name"),
+
+                "bio":
+                    user.get("bio"),
+
+                "public_repositories":
+                    user.get("public_repos"),
+
+                "followers":
+                    user.get("followers"),
+
+                "profile":
+                    user.get("html_url"),
+
+                "repositories":
+                    repos
+            },
             indent=2
         )
 
     except Exception as e:
 
         return json.dumps({
-
-            "error":
-                f"GitHub check failed: {str(e)}"
-
+            "error": str(e)
         })
 
 
 # ============================================================
-# 7. REGISTER TOOLS
+# 7. TOOLS
 # ============================================================
 
 tools = [
-
     job_search,
-
     skill_gap_analysis,
-
     project_idea_lookup,
-
     github_check
-
 ]
 
 
 # ============================================================
-# 8. CREATE AGENT
+# 8. AGENT
 # ============================================================
 
 agent = create_agent(
@@ -592,50 +418,27 @@ agent = create_agent(
     tools=tools,
 
     system_prompt="""
-You are an AI Career Advisor Agent.
+You are an AI Career Advisor.
 
-The student provides:
+The user provides:
 
 - Resume
 - Target role
 - GitHub username
 
-Your available tools are:
+Use the available tools when useful:
 
-1. job_search
-2. skill_gap_analysis
-3. project_idea_lookup
-4. github_check
+1. Job Search
+2. Skill Gap Analysis
+3. Project Ideas
+4. GitHub Check
 
-IMPORTANT:
+After using the tools, return the information needed
+for a final career analysis.
 
-Use the tools to collect real information.
+Do not invent information.
 
-For a complete career analysis, use all four tools.
-
-After the tools have returned their results,
-you MUST provide a final career analysis.
-
-The final response MUST contain:
-
-1. Career suitability
-2. Matching skills
-3. Skill gaps
-4. Recommended skills to learn
-5. Job opportunities
-6. Recommended projects
-7. GitHub analysis
-8. 30/60/90 day roadmap
-9. Final recommendation
-
-Do not invent GitHub information.
-
-Do not invent job listings.
-
-If a tool fails, mention that it failed.
-
-Always finish with a clear final answer
-for the student.
+The final answer will be synthesized separately.
 """
 )
 
@@ -651,35 +454,94 @@ class AgentInput(BaseModel):
     )
 
     role: str = Field(
-        description="Target job role"
+        description="Target role"
     )
 
     github_id: str = Field(
-        description="GitHub username or profile URL"
+        description="GitHub username"
     )
 
 
 # ============================================================
-# 10. EXTRACT TEXT FROM GEMINI
+# 10. FORMAT INPUT
 # ============================================================
 
-def extract_llm_text(response):
+def format_for_agent(x):
 
-    if response is None:
+    if isinstance(x, dict):
 
+        resume = x.get(
+            "resume_text",
+            ""
+        )
+
+        role = x.get(
+            "role",
+            ""
+        )
+
+        github = x.get(
+            "github_id",
+            ""
+        )
+
+    else:
+
+        resume = x.resume_text
+        role = x.role
+        github = x.github_id
+
+    return {
+        "messages": [
+            (
+                "user",
+                f"""
+Student Career Analysis
+
+TARGET ROLE:
+{role}
+
+GITHUB:
+{github}
+
+RESUME:
+{resume}
+
+Analyze this student.
+
+Use the available tools for:
+
+- Job search
+- Skill gap
+- Projects
+- GitHub
+
+Then provide the information needed for
+a final career analysis.
+"""
+            )
+        ]
+    }
+
+
+# ============================================================
+# 11. GET TEXT
+# ============================================================
+
+def get_text(message):
+
+    if message is None:
         return ""
 
     content = getattr(
-        response,
+        message,
         "content",
         None
     )
 
     if content is None:
-
         return ""
 
-    # Normal string
     if isinstance(
         content,
         str
@@ -687,13 +549,12 @@ def extract_llm_text(response):
 
         return content.strip()
 
-    # Gemini content list
     if isinstance(
         content,
         list
     ):
 
-        parts = []
+        result = []
 
         for item in content:
 
@@ -706,120 +567,34 @@ def extract_llm_text(response):
                     "type"
                 ) == "text":
 
-                    text = item.get(
-                        "text",
-                        ""
-                    )
-
-                    if text:
-                        parts.append(
-                            text
+                    result.append(
+                        item.get(
+                            "text",
+                            ""
                         )
+                    )
 
             elif isinstance(
                 item,
                 str
             ):
 
-                parts.append(
-                    item
-                )
+                result.append(item)
 
         return "\n".join(
-            parts
+            result
         ).strip()
 
-    return str(
-        content
-    ).strip()
+    return str(content).strip()
 
 
 # ============================================================
-# 11. FORMAT INPUT FOR AGENT
+# 12. FINAL SYNTHESIS
 # ============================================================
 
-def format_for_agent(x):
-
-    if isinstance(
-        x,
-        dict
-    ):
-
-        resume_text = x.get(
-            "resume_text",
-            ""
-        )
-
-        role = x.get(
-            "role",
-            ""
-        )
-
-        github_id = x.get(
-            "github_id",
-            ""
-        )
-
-    else:
-
-        resume_text = (
-            x.resume_text
-        )
-
-        role = x.role
-
-        github_id = x.github_id
-
-    message = f"""
-Student Career Analysis
-
-TARGET ROLE:
-{role}
-
-GITHUB ID:
-{github_id}
-
-RESUME:
-{resume_text}
-
-Perform a complete career analysis.
-
-Use these tools:
-
-1. Job search
-2. Skill gap analysis
-3. Project recommendations
-4. GitHub analysis
-
-After using the tools, provide a final
-career recommendation.
-"""
-
-    return {
-
-        "messages": [
-
-            (
-                "user",
-                message
-            )
-
-        ]
-
-    }
-
-
-# ============================================================
-# 12. FINAL RESPONSE EXTRACTION
-# ============================================================
-
-def extract_text_response(
+def final_synthesis(
     agent_output
 ):
-
-    if agent_output is None:
-
-        return "No response generated."
 
     if not isinstance(
         agent_output,
@@ -835,93 +610,33 @@ def extract_text_response(
         []
     )
 
-    if not messages:
-
-        return "No response generated."
-
-
     # --------------------------------------------------------
-    # First look for a normal final AI response
+    # Collect all useful messages
     # --------------------------------------------------------
 
-    for message in reversed(
-        messages
-    ):
-
-        content = getattr(
-            message,
-            "content",
-            None
-        )
-
-        if isinstance(
-            content,
-            str
-        ):
-
-            if content.strip():
-
-                # Ignore raw tool-call-only messages
-                if not getattr(
-                    message,
-                    "tool_calls",
-                    None
-                ):
-
-                    return content.strip()
-
-
-        if isinstance(
-            content,
-            list
-        ):
-
-            text_parts = []
-
-            for item in content:
-
-                if isinstance(
-                    item,
-                    dict
-                ):
-
-                    if item.get(
-                        "type"
-                    ) == "text":
-
-                        text = item.get(
-                            "text",
-                            ""
-                        )
-
-                        if text:
-                            text_parts.append(
-                                text
-                            )
-
-            final_text = "\n".join(
-                text_parts
-            ).strip()
-
-            if final_text:
-
-                return final_text
-
-
-    # --------------------------------------------------------
-    # No final text found
-    # Return tool information for fallback synthesis
-    # --------------------------------------------------------
-
-    tool_results = []
+    collected = []
 
     for message in messages:
 
-        content = getattr(
-            message,
-            "content",
-            None
-        )
+        text = get_text(message)
+
+        if text:
+
+            message_type = (
+                message.__class__.__name__
+            )
+
+            collected.append(
+                f"{message_type}:\n{text}"
+            )
+
+    # --------------------------------------------------------
+    # Get tool calls/results
+    # --------------------------------------------------------
+
+    tool_information = []
+
+    for message in messages:
 
         message_type = (
             message.__class__.__name__
@@ -932,49 +647,48 @@ def extract_text_response(
             in message_type
         ):
 
-            if content:
+            text = get_text(message)
 
-                tool_results.append(
-                    str(content)
+            if text:
+
+                tool_information.append(
+                    text
                 )
 
-    if tool_results:
+    # --------------------------------------------------------
+    # If there are no tool results, use all messages
+    # --------------------------------------------------------
 
-        return create_final_synthesis(
-            tool_results
+    if tool_information:
+
+        information = "\n\n".join(
+            tool_information
         )
 
+    else:
 
-    return (
-        "The agent completed but "
-        "did not return a final response."
-    )
+        information = "\n\n".join(
+            collected
+        )
 
-
-# ============================================================
-# 13. FINAL SYNTHESIS FALLBACK
-# ============================================================
-
-def create_final_synthesis(
-    tool_results
-):
-
-    combined_results = "\n\n".join(
-        tool_results
-    )
+    # --------------------------------------------------------
+    # Ask Gemma for FINAL ANSWER
+    # --------------------------------------------------------
 
     prompt = f"""
-You are the final career advisor.
+You are the final AI Career Advisor.
 
-The tools have returned the following information:
+Create a complete final answer using the
+information below.
 
-{combined_results}
+INFORMATION:
+{information}
 
-Create the FINAL career analysis.
+Return ONLY the final career analysis.
 
-Use this exact structure:
+Use this structure:
 
-# Career Analysis
+# AI Career Analysis
 
 ## 1. Career Suitability
 
@@ -982,7 +696,7 @@ Use this exact structure:
 
 ## 3. Skill Gaps
 
-## 4. Recommended Skills
+## 4. Recommended Skills to Learn
 
 ## 5. Job Opportunities
 
@@ -994,12 +708,12 @@ Use this exact structure:
 
 ## 9. Final Recommendation
 
-Use only information present in the
-tool results and student information.
+Be clear and practical.
 
-Do not invent facts.
+Do not invent information.
 
-Keep the answer clear and useful for a student.
+If a section has no available information,
+say "No information available."
 """
 
     try:
@@ -1008,32 +722,31 @@ Keep the answer clear and useful for a student.
             prompt
         )
 
-        text = extract_llm_text(
+        result = get_text(
             response
         )
 
-        if text:
+        if result:
 
-            return text
+            return result
 
     except Exception as e:
 
         return (
-            "Final synthesis failed: "
+            "Final synthesis error: "
             + str(e)
-            + "\n\nTool results:\n"
-            + combined_results
+            + "\n\n"
+            + information
         )
 
     return (
-        "Final synthesis could not be generated."
-        "\n\nTool results:\n"
-        + combined_results
+        "No final response was generated.\n\n"
+        + information
     )
 
 
 # ============================================================
-# 14. AGENT CHAIN
+# 13. AGENT CHAIN
 # ============================================================
 
 formatted_agent_chain = (
@@ -1045,7 +758,7 @@ formatted_agent_chain = (
     | agent
 
     | RunnableLambda(
-        extract_text_response
+        final_synthesis
     )
 
 ).with_types(
@@ -1058,29 +771,20 @@ formatted_agent_chain = (
 
 
 # ============================================================
-# 15. FASTAPI APPLICATION
+# 14. FASTAPI
 # ============================================================
 
 app = FastAPI(
-
-    title=
-        "AI Career Advisor Agent",
-
-    description=
-        "AI Career Agent using Gemma 4, "
-        "LangChain and FastAPI",
-
+    title="AI Career Advisor Agent",
     version="1.0.0"
-
 )
 
 
 # ============================================================
-# 16. CORS
+# 15. CORS
 # ============================================================
 
 app.add_middleware(
-
     CORSMiddleware,
 
     allow_origins=["*"],
@@ -1090,16 +794,14 @@ app.add_middleware(
     allow_methods=["*"],
 
     allow_headers=["*"]
-
 )
 
 
 # ============================================================
-# 17. LANGSERVE ROUTE
+# 16. LANGSERVE
 # ============================================================
 
 add_routes(
-
     app,
 
     formatted_agent_chain,
@@ -1107,12 +809,11 @@ add_routes(
     path="/agent",
 
     playground_type="default"
-
 )
 
 
 # ============================================================
-# 18. PDF TEXT EXTRACTION
+# 17. PDF EXTRACTION
 # ============================================================
 
 def extract_pdf_text(
@@ -1146,7 +847,7 @@ def extract_pdf_text(
 
 
 # ============================================================
-# 19. PDF ANALYSIS ENDPOINT
+# 18. PDF API
 # ============================================================
 
 @app.post(
@@ -1162,105 +863,56 @@ async def analyze_pdf(
 
 ):
 
-    # --------------------------------------------------------
-    # Validate PDF
-    # --------------------------------------------------------
-
     if not resume.filename.lower().endswith(
         ".pdf"
     ):
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=
-                "Only PDF files are allowed."
-
+            detail="Only PDF files are allowed."
         )
-
-
-    # --------------------------------------------------------
-    # Read PDF
-    # --------------------------------------------------------
 
     file_bytes = await resume.read()
 
     if not file_bytes:
 
         raise HTTPException(
-
             status_code=400,
-
-            detail="Uploaded PDF is empty."
-
+            detail="PDF is empty."
         )
-
-
-    # --------------------------------------------------------
-    # Extract text
-    # --------------------------------------------------------
 
     try:
 
-        resume_text = (
-            extract_pdf_text(
-                file_bytes
-            )
+        resume_text = extract_pdf_text(
+            file_bytes
         )
 
     except Exception as e:
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=
-                f"PDF reading failed: {str(e)}"
-
+            detail=str(e)
         )
-
 
     if not resume_text.strip():
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=
-                "Could not extract text "
-                "from the PDF."
-
+            detail="Could not extract PDF text."
         )
 
+    result = await formatted_agent_chain.ainvoke({
 
-    # --------------------------------------------------------
-    # Run agent
-    # --------------------------------------------------------
+        "resume_text":
+            resume_text,
 
-    result = (
-        await formatted_agent_chain.ainvoke(
+        "role":
+            role,
 
-            {
+        "github_id":
+            github_id
 
-                "resume_text":
-                    resume_text,
-
-                "role":
-                    role,
-
-                "github_id":
-                    github_id
-
-            }
-
-        )
-    )
-
-
-    # --------------------------------------------------------
-    # Return result
-    # --------------------------------------------------------
+    })
 
     return {
 
@@ -1280,7 +932,7 @@ async def analyze_pdf(
 
 
 # ============================================================
-# 20. HOME ROUTE
+# 19. HOME
 # ============================================================
 
 @app.get("/")
@@ -1295,41 +947,29 @@ def home():
             "gemma-4-31b-it",
 
         "tools": [
-
             "job_search",
-
             "skill_gap_analysis",
-
             "project_idea_lookup",
-
             "github_check"
-
         ]
-
     }
 
 
 # ============================================================
-# 21. RUN SERVER
+# 20. RUN
 # ============================================================
 
 if __name__ == "__main__":
 
     port = int(
-
         os.environ.get(
             "PORT",
             8000
         )
-
     )
 
     uvicorn.run(
-
         app,
-
         host="0.0.0.0",
-
         port=port
-
     )
