@@ -55,24 +55,71 @@ gemma = ChatGoogleGenerativeAI(
 
 
 # ============================================================
-# 3. GEMINI FLASH - FINAL SYNTHESIS
+# 3. GEMINI 3.6 FLASH - FINAL ANSWER
 # ============================================================
 
 final_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    google_api_key=GOOGLE_API_KEY,
-    temperature=0
+    model="gemini-3.6-flash",
+    google_api_key=GOOGLE_API_KEY
 )
 
 
 # ============================================================
-# 4. JOB SEARCH TOOL
+# 4. TEXT EXTRACTION HELPER
+# ============================================================
+
+def extract_text(message):
+
+    if message is None:
+        return ""
+
+    content = getattr(
+        message,
+        "content",
+        None
+    )
+
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+
+        parts = []
+
+        for item in content:
+
+            if isinstance(item, dict):
+
+                if item.get("type") == "text":
+
+                    text = item.get(
+                        "text",
+                        ""
+                    )
+
+                    if text:
+                        parts.append(text)
+
+            elif isinstance(item, str):
+
+                parts.append(item)
+
+        return "\n".join(parts).strip()
+
+    return str(content).strip()
+
+
+# ============================================================
+# 5. JOB SEARCH TOOL
 # ============================================================
 
 @tool
 def job_search(role: str) -> str:
     """
-    Search for jobs related to the student's target role.
+    Search for jobs related to the target role.
     """
 
     try:
@@ -116,8 +163,7 @@ def job_search(role: str) -> str:
         for job in all_jobs:
 
             title = (
-                job.get("title")
-                or ""
+                job.get("title") or ""
             ).lower()
 
             if any(
@@ -146,9 +192,7 @@ def job_search(role: str) -> str:
                         ),
 
                     "url":
-                        job.get(
-                            "url"
-                        )
+                        job.get("url")
 
                 })
 
@@ -157,15 +201,9 @@ def job_search(role: str) -> str:
 
         return json.dumps(
             {
-                "target_role":
-                    role,
-
-                "jobs_found":
-                    len(jobs),
-
-                "jobs":
-                    jobs
-
+                "target_role": role,
+                "jobs_found": len(jobs),
+                "jobs": jobs
             },
             indent=2
         )
@@ -173,15 +211,13 @@ def job_search(role: str) -> str:
     except Exception as e:
 
         return json.dumps({
-
             "error":
                 f"Job search failed: {str(e)}"
-
         })
 
 
 # ============================================================
-# 5. SKILL GAP TOOL
+# 6. SKILL GAP TOOL
 # ============================================================
 
 @tool
@@ -190,7 +226,7 @@ def skill_gap_analysis(
     role: str
 ) -> str:
     """
-    Compare the resume with the target role.
+    Analyze the student's resume against the target role.
     """
 
     prompt = f"""
@@ -202,19 +238,19 @@ TARGET ROLE:
 STUDENT RESUME:
 {resume_text}
 
-Analyze the student's preparation for the target role.
+Analyze the student for this target role.
 
 Give:
 
 1. Existing skills
 2. Matching skills
 3. Missing skills
-4. Skills to improve
+4. Skills that need improvement
 5. Technologies to learn
 6. Priority of each skill
 7. Practical learning roadmap
 
-Focus on a college student / fresher.
+The student is a college student/fresher.
 
 Do not invent information.
 """
@@ -238,7 +274,7 @@ Do not invent information.
 
 
 # ============================================================
-# 6. PROJECT IDEA TOOL
+# 7. PROJECT IDEA LOOKUP
 # ============================================================
 
 @tool
@@ -247,7 +283,7 @@ def project_idea_lookup(
     skills: str
 ) -> str:
     """
-    Find relevant GitHub projects for the target role.
+    Find GitHub projects related to the target role and skills.
     """
 
     try:
@@ -262,24 +298,19 @@ def project_idea_lookup(
         )
 
         response = requests.get(
-
             url,
-
             params={
                 "q": query,
                 "sort": "stars",
                 "order": "desc",
                 "per_page": 10
             },
-
             headers={
                 "Accept":
                     "application/vnd.github+json",
-
                 "User-Agent":
                     "AI-Career-Agent"
             },
-
             timeout=30
         )
 
@@ -297,19 +328,13 @@ def project_idea_lookup(
             projects.append({
 
                 "name":
-                    repo.get(
-                        "name"
-                    ),
+                    repo.get("name"),
 
                 "description":
-                    repo.get(
-                        "description"
-                    ),
+                    repo.get("description"),
 
                 "language":
-                    repo.get(
-                        "language"
-                    ),
+                    repo.get("language"),
 
                 "stars":
                     repo.get(
@@ -317,39 +342,31 @@ def project_idea_lookup(
                     ),
 
                 "url":
-                    repo.get(
-                        "html_url"
-                    )
+                    repo.get("html_url")
 
             })
 
         return json.dumps(
-
             {
-                "target_role":
-                    role,
-
+                "target_role": role,
+                "projects_found":
+                    len(projects),
                 "projects":
                     projects
-
             },
-
             indent=2
-
         )
 
     except Exception as e:
 
         return json.dumps({
-
             "error":
-                f"Project search failed: {str(e)}"
-
+                f"Project lookup failed: {str(e)}"
         })
 
 
 # ============================================================
-# 7. GITHUB CHECK TOOL
+# 8. GITHUB CHECK
 # ============================================================
 
 @tool
@@ -362,7 +379,7 @@ def github_check(
 
     username = github_id.strip()
 
-    # If user enters full URL
+    # Full GitHub URL support
     if "github.com/" in username:
 
         username = username.split(
@@ -372,7 +389,6 @@ def github_check(
 
     username = username.strip("/")
 
-    # Remove @
     if username.startswith("@"):
 
         username = username[1:]
@@ -405,13 +421,9 @@ def github_check(
         )
 
         profile_response = requests.get(
-
             profile_url,
-
             headers=headers,
-
             timeout=20
-
         )
 
         if profile_response.status_code == 404:
@@ -437,30 +449,18 @@ def github_check(
         # ----------------------------------------------------
 
         repos_url = (
-
             f"https://api.github.com/"
             f"users/{username}/repos"
-
         )
 
         repos_response = requests.get(
-
             repos_url,
-
             headers=headers,
-
             params={
-
-                "sort":
-                    "updated",
-
-                "per_page":
-                    10
-
+                "sort": "updated",
+                "per_page": 10
             },
-
             timeout=20
-
         )
 
         repos_response.raise_for_status()
@@ -476,19 +476,13 @@ def github_check(
             repos.append({
 
                 "name":
-                    repo.get(
-                        "name"
-                    ),
+                    repo.get("name"),
 
                 "description":
-                    repo.get(
-                        "description"
-                    ),
+                    repo.get("description"),
 
                 "language":
-                    repo.get(
-                        "language"
-                    ),
+                    repo.get("language"),
 
                 "stars":
                     repo.get(
@@ -572,7 +566,7 @@ def github_check(
 
 
 # ============================================================
-# 8. TOOLS
+# 9. REGISTER TOOLS
 # ============================================================
 
 tools = [
@@ -589,7 +583,7 @@ tools = [
 
 
 # ============================================================
-# 9. GEMMA AGENT
+# 10. GEMMA AGENT
 # ============================================================
 
 agent = create_agent(
@@ -601,41 +595,42 @@ agent = create_agent(
     system_prompt="""
 You are an AI Career Advisor Agent.
 
-Your task is to analyze a student's:
+The student provides:
 
 - Resume
 - Target role
 - GitHub username
 
-You have four tools:
+Available tools:
 
 1. job_search
 2. skill_gap_analysis
 3. project_idea_lookup
 4. github_check
 
-Use the tools to collect information.
-
-For a complete career analysis, use all four tools.
+Use all four tools for a complete career analysis.
 
 IMPORTANT:
 
 Do not invent information.
 
-Use the GitHub username exactly as provided.
+Use the exact GitHub username provided.
 
-Use job search results only when returned by the tool.
+Use actual job results returned by the job search tool.
 
-After tool calls, stop and return the collected
-information. A separate model will create the final
-career analysis.
+Use GitHub information returned by the GitHub tool.
+
+After the tools finish, return the collected
+information to the application.
+
+A separate model will create the final answer.
 """
 
 )
 
 
 # ============================================================
-# 10. INPUT MODEL
+# 11. INPUT MODEL
 # ============================================================
 
 class AgentInput(BaseModel):
@@ -654,91 +649,12 @@ class AgentInput(BaseModel):
 
 
 # ============================================================
-# 11. TEXT EXTRACTION
-# ============================================================
-
-def extract_text(
-    message
-):
-
-    if message is None:
-
-        return ""
-
-    content = getattr(
-        message,
-        "content",
-        None
-    )
-
-    if content is None:
-
-        return ""
-
-    if isinstance(
-        content,
-        str
-    ):
-
-        return content.strip()
-
-    if isinstance(
-        content,
-        list
-    ):
-
-        parts = []
-
-        for item in content:
-
-            if isinstance(
-                item,
-                dict
-            ):
-
-                if item.get(
-                    "type"
-                ) == "text":
-
-                    text = item.get(
-                        "text",
-                        ""
-                    )
-
-                    if text:
-
-                        parts.append(
-                            text
-                        )
-
-            elif isinstance(
-                item,
-                str
-            ):
-
-                parts.append(
-                    item
-                )
-
-        return "\n".join(
-            parts
-        ).strip()
-
-    return str(
-        content
-    ).strip()
-
-
-# ============================================================
 # 12. FORMAT INPUT
 # ============================================================
 
 def format_for_agent(x):
 
-    if isinstance(
-        x,
-        dict
-    ):
+    if isinstance(x, dict):
 
         resume = x.get(
             "resume_text",
@@ -783,7 +699,7 @@ Use all available tools:
 3. Project Idea Lookup
 4. GitHub Check
 
-Collect the tool results.
+Collect the results from the tools.
 """
 
     return {
@@ -801,7 +717,7 @@ Collect the tool results.
 
 
 # ============================================================
-# 13. EXTRACT TOOL RESULTS
+# 13. COLLECT TOOL RESULTS
 # ============================================================
 
 def collect_tool_results(
@@ -836,7 +752,6 @@ def collect_tool_results(
             message.__class__.__name__
         )
 
-        # ToolMessage
         if (
             message_type == "tool"
             or
@@ -854,10 +769,8 @@ def collect_tool_results(
                     text
                 )
 
-    # --------------------------------------------------------
-    # Fallback: collect all useful content
-    # --------------------------------------------------------
 
+    # Fallback
     if not results:
 
         for message in messages:
@@ -872,9 +785,13 @@ def collect_tool_results(
                     text
                 )
 
+
     if not results:
 
-        return "No tool results were returned."
+        return (
+            "No tool results were returned."
+        )
+
 
     return "\n\n".join(
         results
@@ -882,7 +799,7 @@ def collect_tool_results(
 
 
 # ============================================================
-# 14. FINAL SYNTHESIS USING GEMINI FLASH
+# 14. FINAL SYNTHESIS
 # ============================================================
 
 def create_final_answer(
@@ -899,15 +816,15 @@ def create_final_answer(
     prompt = f"""
 You are the final AI Career Advisor.
 
-Create a complete career analysis using
-the tool results below.
+Create a complete career analysis from
+the information below.
 
 TOOL RESULTS:
 {tool_results}
 
-Return ONLY the final answer.
+Return ONLY the final career analysis.
 
-Use exactly this structure:
+Use this structure:
 
 # AI Career Analysis
 
@@ -923,7 +840,7 @@ the target role.
 
 ## 3. Skill Gaps
 
-List important missing or weak skills.
+List missing or weak skills.
 
 ## 4. Recommended Skills to Learn
 
@@ -931,13 +848,13 @@ Give practical skills and technologies.
 
 ## 5. Job Opportunities
 
-Summarize relevant jobs returned by
-the job search tool.
+Summarize the relevant jobs returned
+by the job search tool.
 
 ## 6. Recommended Projects
 
-Recommend projects based on the
-student's skills and target role.
+Recommend projects based on the student's
+skills and target role.
 
 ## 7. GitHub Analysis
 
@@ -957,7 +874,7 @@ by the GitHub tool.
 
 ## 9. Final Recommendation
 
-Give a clear recommendation.
+Give a clear final recommendation.
 
 IMPORTANT:
 
@@ -966,10 +883,10 @@ Do not invent GitHub information.
 Do not invent job information.
 
 If information is unavailable,
-say "No information available."
+write "No information available."
 
-Keep the answer suitable for a
-B.Tech student / fresher.
+Keep the answer practical for a
+B.Tech student/fresher.
 """
 
 
@@ -987,6 +904,11 @@ B.Tech student / fresher.
 
             return result
 
+        return (
+            "Final model returned an empty response.\n\n"
+            + tool_results
+        )
+
     except Exception as e:
 
         return (
@@ -997,57 +919,43 @@ B.Tech student / fresher.
         )
 
 
-    return (
-        "Final synthesis returned no text.\n\n"
-        + tool_results
-    )
-
-
 # ============================================================
-# 15. COMPLETE AGENT CHAIN
+# 15. RUN AGENT
 # ============================================================
 
-def run_career_agent(
-    x
-):
-
-    # --------------------------------------------------------
-    # Format input
-    # --------------------------------------------------------
-
-    formatted = (
-        format_for_agent(x)
-    )
-
-
-    # --------------------------------------------------------
-    # Run Gemma agent
-    # --------------------------------------------------------
+def run_career_agent(x):
 
     try:
 
-        agent_output = (
-            agent.invoke(
-                formatted
+        formatted = (
+            format_for_agent(x)
+        )
+
+        # Run Gemma agent
+        agent_output = agent.invoke(
+            formatted
+        )
+
+        # Run final Gemini synthesis
+        final_answer = (
+            create_final_answer(
+                agent_output
             )
         )
+
+        return final_answer
 
     except Exception as e:
 
         return (
-            "Agent execution failed: "
+            "Career agent failed: "
             + str(e)
         )
 
 
-    # --------------------------------------------------------
-    # Final synthesis
-    # --------------------------------------------------------
-
-    return create_final_answer(
-        agent_output
-    )
-
+# ============================================================
+# 16. LANGSERVE CHAIN
+# ============================================================
 
 formatted_agent_chain = (
 
@@ -1065,7 +973,7 @@ formatted_agent_chain = (
 
 
 # ============================================================
-# 16. FASTAPI
+# 17. FASTAPI APP
 # ============================================================
 
 app = FastAPI(
@@ -1074,7 +982,8 @@ app = FastAPI(
         "AI Career Advisor Agent",
 
     description=
-        "Gemma 4 Agent with Career Analysis Tools",
+        "Gemma 4 Career Agent with "
+        "Job, Skill, Project and GitHub tools",
 
     version="2.0.0"
 
@@ -1082,7 +991,7 @@ app = FastAPI(
 
 
 # ============================================================
-# 17. CORS
+# 18. CORS
 # ============================================================
 
 app.add_middleware(
@@ -1101,7 +1010,7 @@ app.add_middleware(
 
 
 # ============================================================
-# 18. LANGSERVE
+# 19. LANGSERVE ROUTE
 # ============================================================
 
 add_routes(
@@ -1118,7 +1027,7 @@ add_routes(
 
 
 # ============================================================
-# 19. PDF EXTRACTION
+# 20. PDF TEXT EXTRACTION
 # ============================================================
 
 def extract_pdf_text(
@@ -1152,7 +1061,7 @@ def extract_pdf_text(
 
 
 # ============================================================
-# 20. PDF ENDPOINT
+# 21. PDF ANALYSIS ENDPOINT
 # ============================================================
 
 @app.post(
@@ -1262,7 +1171,7 @@ async def analyze_pdf(
 
 
 # ============================================================
-# 21. HOME
+# 22. HOME ROUTE
 # ============================================================
 
 @app.get("/")
@@ -1277,7 +1186,7 @@ def home():
             "gemma-4-31b-it",
 
         "final_model":
-            "gemini-2.5-flash",
+            "gemini-3.6-flash",
 
         "tools": [
 
@@ -1295,7 +1204,7 @@ def home():
 
 
 # ============================================================
-# 22. RUN SERVER
+# 23. RUN SERVER
 # ============================================================
 
 if __name__ == "__main__":
