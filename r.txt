@@ -1,4 +1,3 @@
-
 fastapi
 uvicorn
 langserve
@@ -11,3 +10,4 @@ requests
 sse_starlette
 python-dotenv
 pypdf
+python-multipart
